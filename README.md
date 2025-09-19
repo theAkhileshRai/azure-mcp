@@ -1,0 +1,2 @@
+# azure-mcp
+Public repo
