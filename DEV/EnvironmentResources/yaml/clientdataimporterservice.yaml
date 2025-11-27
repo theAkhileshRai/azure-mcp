@@ -1,0 +1,26 @@
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  name: clientdataimporter-identity
+spec:
+  type: 0
+  resourceID: #{clientdataimporter_identity_resource_id}#
+  clientID: #{clientdataimporter_identity_resource_clientId}#
+---
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: clientdataimporter-identity-binding
+spec:
+  azureIdentity: clientdataimporter-identity
+  selector: clientdataimporter-identity-access
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clientdataimporter-sa
+  namespace: #{namespace}#
+  annotations:
+    azure.workload.identity/client-id: #{clientdataimporter_identity_resource_clientId}#
+  labels:
+    azure.workload.identity/use: "true"

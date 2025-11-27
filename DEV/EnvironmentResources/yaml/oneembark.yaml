@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oneembarkmicroserviceidentity-sa
+  namespace: #{namespace}#
+  annotations:
+    azure.workload.identity/client-id: #{oneembark_identity_resource_clientId}#
+  labels:
+    azure.workload.identity/use: "true"

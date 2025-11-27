@@ -1,0 +1,13 @@
+trigger: 
+  branches: 
+    include:
+    - main
+  paths:
+    include:
+    - FrontDoor/*
+
+extends:
+  template: ../Templates/terraform-frontdoor.yaml
+  parameters:
+    folder: FrontDoor
+    deploy_yaml: false

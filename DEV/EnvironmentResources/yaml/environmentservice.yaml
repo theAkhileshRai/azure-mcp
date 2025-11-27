@@ -1,0 +1,26 @@
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  name: environment-identity
+spec:
+  type: 0
+  resourceID: #{environment_identity_resource_id}#
+  clientID: #{environment_identity_resource_clientId}#
+---
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: environment-identity-binding
+spec:
+  azureIdentity: environment-identity
+  selector: environment-identity-access
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: environment-sa
+  namespace: #{namespace}#
+  annotations:
+    azure.workload.identity/client-id: #{environment_identity_resource_clientId}#
+  labels:
+    azure.workload.identity/use: "true"

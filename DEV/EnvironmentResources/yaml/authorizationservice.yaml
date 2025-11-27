@@ -1,0 +1,26 @@
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  name: authorization-identity
+spec:
+  type: 0
+  resourceID: #{authorization_identity_resource_id}#
+  clientID: #{authorization_identity_resource_clientId}#
+---
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: authorization-identity-binding
+spec:
+  azureIdentity: authorization-identity
+  selector: authorization-identity-access
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: authorization-sa
+  namespace: #{namespace}#
+  annotations:
+    azure.workload.identity/client-id: #{authorization_identity_resource_clientId}#
+  labels:
+    azure.workload.identity/use: "true"
