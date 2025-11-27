@@ -1,0 +1,8 @@
+resource "azurerm_cdn_profile" "cdn" {
+  name                = "${local.regioncodeprefix}${local.envCode}cdn"
+  location            = "__location__"
+  resource_group_name = "__resource_group_name__"
+  sku                 = "__cdn_sku__"
+  
+  tags                = local.appx_tags
+}
