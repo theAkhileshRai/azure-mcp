@@ -1,0 +1,641 @@
+variables:
+  - group: DevOps-KeyVault
+  - name: 'AgentPool'
+    value: 'hwcex-windows'
+trigger: none
+
+stages:
+  ###### BUILD #######
+  - stage: Build
+    displayName: Build stage
+    jobs:
+      - job: Build
+        displayName: Build Terraform Artifacts
+        pool:
+          name: $(AgentPool)
+        steps:
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: DEV'
+            inputs:
+              SourceFolder: DEV/Terraform
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/DEV'
+
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: QA'
+            inputs:
+              SourceFolder: QA/Terraform
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+                !cognitive-services.tf
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/QA'
+
+          # - task: CopyFiles@2
+          #   displayName: 'Copy Terraform files to artifacts: LPT'
+          #   inputs:
+          #     SourceFolder: LPT/Terraform
+          #     Contents: |
+          #       *.tf
+          #       !(*.md)
+          #     TargetFolder: '$(Build.ArtifactStagingDirectory)/LPT'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: UAT'
+            inputs:
+              SourceFolder: UAT/Terraform
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+                !servicebus.tf
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/UAT'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: UATDR'
+            inputs:
+              SourceFolder: UATDR/Terraform
+              # added variables.tf to be excluded for UAT DR only (duplicate variables)
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+                !azsqldb.tf
+                !servicebus.tf
+                !cdn.tf
+                !variables.tf
+                !atmprofile-frontui.tf
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/UATDR'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: PRODEMEA'
+            inputs:
+              SourceFolder: PRODEMEA/Terraform
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/PRODEMEA'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: PRODEMEADR'
+            inputs:
+              SourceFolder: PRODEMEADR/Terraform
+              # added variables.tf to be excluded for PROD EMEA DR only (duplicate variables)
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+                !azsqldb.tf
+                !servicebus.tf
+                !variables.tf
+                !atmprofile-frontui.tf
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/PRODEMEADR'
+
+          - task: CopyFiles@2
+            displayName: 'Copy Terraform files to artifacts: PRODNA'
+            inputs:
+              SourceFolder: PRODNA/Terraform
+              Contents: |
+                *.tf
+                *.tfvars
+                !(*.md)
+                !webapp-frontui.tf
+                !webapp-prioritynotificationcenter.tf
+                !webapp-proxiesaux.tf
+                !webapp-widgets.tf
+                !webapp-widgetsnew.tf
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/PRODNA'
+
+          # - task: CopyFiles@2
+          #   displayName: 'Copy Terraform files to artifacts: PRODNADR'
+          #   inputs:
+          #     SourceFolder: PRODNADR/Terraform
+          #     Contents: |
+          #       *.tf
+          #       *.tfvars
+          #       !(*.md)
+          #     TargetFolder: '$(Build.ArtifactStagingDirectory)/PRODNADR'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Artifact: terraform'
+            inputs:
+              ArtifactName: terraform
+
+  ###### DEPLOY - DEV #######
+  - stage: DEV
+    displayName: n21-pex-dev-projectex-rgrpnew
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n21-pex-nonprod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: DEV'
+        environment: dev
+        variables:
+          agw_name: n21appxdev-agw
+          tf_environment: DEV
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-NONPROD
+          tf_storage_account_name: tfwtwhcbtrodevpex
+          tf_container_name: tf148611
+          tf_version: '0.12.31'
+          dnn_stg_conn_string: $(n21projectexdnndevstg-connectionstring)
+          dnn_stg_conn_string_google: $(n21projectexdnndevstg-connstring-googleconsoleadmin)
+          sql_administrator_login_password: $(n21pexdevsqlsrv-dbadmin-pw-dev-centralus)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-dev)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: DEV'
+        dependsOn: validation_step
+        environment: dev
+        variables:
+          agw_name: n21appxdev-agw
+          tf_environment: DEV
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-NONPROD
+          tf_storage_account_name: tfwtwhcbtrodevpex
+          tf_container_name: tf148611
+          tf_version: '0.12.31'
+          dnn_stg_conn_string: $(n21projectexdnndevstg-connectionstring)
+          sql_administrator_login_password: $(n21pexdevsqlsrv-dbadmin-pw-dev-centralus)
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-dev)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - QA #######
+  - stage: QA
+    displayName: n21-pex-qa-projectex-rgrpnew
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n21-pex-nonprod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: QA'
+        environment: qa
+        variables:
+          agw_name: n21appxqa-agw
+          tf_environment: QA
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-NONPROD
+          tf_storage_account_name: tfwtwhcbtrodevpex
+          tf_container_name: tf148671
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(n21pexqasqlsrv-dbadmin-pw-qa-centralus)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-dev)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: QA'
+        dependsOn: validation_step
+        environment: qa
+        variables:
+          tf_environment: QA
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-NONPROD
+          tf_storage_account_name: tfwtwhcbtrodevpex
+          tf_container_name: tf148671
+          tf_version: '0.12.31'
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-dev)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-DEV)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - UAT #######
+  - stage: UAT
+    displayName: n21-pex-uat-projectex-rgrp
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n20-pex-prod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: UAT'
+        environment: uat
+        variables:
+          agw_name: n21appxuat-agw
+          tf_environment: UAT
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf148470
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-uat-na)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: UAT'
+        dependsOn: validation_step
+        environment: uat
+        variables:
+          tf_environment: UAT
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf148470
+          tf_version: '0.12.31'
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - UAT-DR #######
+  - stage: UATDR
+    displayName: n20-pex-uat-projectex-rgrp
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n20-pex-prod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: UAT DR'
+        environment: uat-dr
+        variables:
+          agw_name: n20appxuat-agw
+          tf_environment: UATDR
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf1481843
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(embarkstandard-dbadmin-pw-uatdr-na)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    IsDR: true # This parameter is used only as there is another step needed for DR environments
+                    ResourceNamePrimary: n21appxuat-agw-pip
+                    ResourceGroupNamePrimary: n21-pex-uat-projectex-rgrp
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: UAT DR'
+        dependsOn: validation_step
+        environment: uat-dr
+        variables:
+          tf_environment: UATDR
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf1481843
+          tf_version: '0.12.31'
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - PRODEMEA #######
+  - stage: PRODEMEA
+    displayName: e20-pex-prd-projectex-rgrp
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n20-pex-prod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: PROD EMEA'
+        environment: prod
+        variables:
+          agw_name: e20appxprd-agw
+          tf_environment: PRODEMEA
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf148527
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      # PEX-9182 - Temporarily commenting out apply step of PROD EMEA as we are working to resolve an issue with state drift
+
+                    # - job: validation_step
+      #   displayName: Terraform plan validation
+      #   dependsOn: terraform_plan
+      #   pool: server
+      #   steps:
+      #     - task: ManualValidation@0
+      #       timeoutInMinutes: 20 # task times out in 20 mins
+      #       inputs:
+      #         instructions: 'Please validate the Terraform Plan output'
+      #         onTimeout: 'reject'
+      # - deployment: terrform_apply
+      #   displayName: 'Terraform Apply: PROD EMEA'
+      #   dependsOn: validation_step
+      #   environment: prod
+      #   variables:
+      #     agw_name: e20appxprd-agw
+      #     tf_environment: PRODEMEA
+      #     tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+      #     tf_storage_account_name: tfwtwhcbtroprodpex
+      #     tf_container_name: tf148527
+      #     tf_version: '0.12.31'
+      #     sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+      #   pool:
+      #     name: $(AgentPool)
+      #   strategy:
+      #     runOnce:
+      #       deploy:
+      #         steps:
+      #           - template: terraform.artifacts.yml
+      #             parameters:
+      #               ScriptsOnly: true
+      #           - template: terraform.apply.yml
+      #             parameters:
+      #               ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+      #               ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+      #               ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+      #               ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+      #               ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - PRODEMEA-DR #######
+  - stage: PRODEMEADR
+    displayName: e21-pex-prd-projectex-rgrp
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n20-pex-prod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: PROD EMEA DR'
+        environment: prod
+        variables:
+          agw_name: e21appxprd-agw
+          tf_environment: PRODEMEADR
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf148568
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    IsDR: true # This parameter is used only as there is another step needed for DR environments
+                    ResourceNamePrimary: e20appxprd-agw-pip
+                    ResourceGroupNamePrimary: e20-pex-prd-projectex-rgrp
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: PROD EMEA DR'
+        dependsOn: validation_step
+        environment: prod
+        variables:
+          agw_name: e21appxprd-agw
+          tf_environment: PRODEMEADR
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf148568
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+
+  ###### DEPLOY - PRODNA #######
+  - stage: PRODNA
+    displayName: n20-pex-prd-projectex-rgrp
+    dependsOn: Build
+    condition: succeeded()
+    pool:
+      name: $(AgentPool)
+    variables:
+      - group: n20-pex-prod-kv
+    jobs:
+      - deployment: terraform_plan
+        displayName: 'Terraform Plan: PROD NA'
+        environment: prod
+        variables:
+          agw_name: n20appxprd-agw
+          tf_environment: PRODNA
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf1481142
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                - template: terraform.plan.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
+      - job: validation_step
+        displayName: Terraform plan validation
+        dependsOn: terraform_plan
+        pool: server
+        steps:
+          - task: ManualValidation@0
+            timeoutInMinutes: 20 # task times out in 20 mins
+            inputs:
+              instructions: 'Please validate the Terraform Plan output'
+              onTimeout: 'reject'
+      - deployment: terrform_apply
+        displayName: 'Terraform Apply: PROD NA'
+        dependsOn: validation_step
+        environment: prod
+        variables:
+          agw_name: n20appxprd-agw
+          tf_environment: PRODNA
+          tf_resource_group_name: TROP-DEVOPS-TERRAFORM-PROD
+          tf_storage_account_name: tfwtwhcbtroprodpex
+          tf_container_name: tf1481142
+          tf_version: '0.12.31'
+          sql_administrator_login_password: $(projectexdnn-dbadmin-pw-prd-na)
+        pool:
+          name: $(AgentPool)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: terraform.artifacts.yml
+                  parameters:
+                    ScriptsOnly: true
+                - template: terraform.apply.yml
+                  parameters:
+                    ServiceConnection: DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD
+                    ARM_SUBSCRIPTION_ID: $(kv-arm-subscription-id-prod)
+                    ARM_CLIENT_ID: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD-clientid)
+                    ARM_CLIENT_SECRET: $(kv-DEVOPS-AZDO-Pipeline-Subscription-Contributor-PROD)
+                    ARM_TENANT_ID: $(kv-arm-tenant-id)
